@@ -1032,15 +1032,37 @@ class RemoteControlManager(
         (function() {
             const errors = [];
 
+            function isOpaqueOrigin() {
+                try {
+                    if (!window.location) { return true; }
+                    const href = window.location.href || '';
+                    if (href === '' || href === 'about:blank') { return true; }
+                    return window.location.origin === 'null';
+                } catch (originErr) {
+                    return true;
+                }
+            }
+
+            const opaqueOrigin = isOpaqueOrigin();
+
             function recordError(section, err) {
                 const message = err && (err.message || err.toString()) || 'Unknown error';
                 const name = err && err.name ? err.name : 'Error';
                 errors.push({ section, name, message });
-                console.error('[Passage] Page data ' + section + ' error:', err);
+                const logMessage = '[Passage] Page data ' + section + ' error:';
+                if (name === 'SecurityError') {
+                    console.warn(logMessage, err);
+                } else {
+                    console.error(logMessage, err);
+                }
             }
 
             function safeCollectStorage(getStorage, label) {
                 const items = [];
+                if (opaqueOrigin) {
+                    console.warn('[Passage] Skipping ' + label + ' collection for opaque origin');
+                    return items;
+                }
                 let storage;
                 try {
                     storage = getStorage();
@@ -1072,6 +1094,10 @@ class RemoteControlManager(
 
             function safeCollectCookies() {
                 const cookies = [];
+                if (opaqueOrigin) {
+                    console.warn('[Passage] Skipping cookie collection for opaque origin');
+                    return cookies;
+                }
                 try {
                     if (document.cookie) {
                         document.cookie.split(';').forEach(rawCookie => {
@@ -1526,6 +1552,9 @@ class RemoteControlManager(
                 PassageLogger.info(TAG, "[$sourceWebViewType WebView] Manual screenshot capture requested")
                 // Screenshot capture could be implemented here if needed
             }
+            "message" -> {
+                handleNestedPassageMessage(message)
+            }
             else -> {
                 PassageLogger.warn(TAG, "Unknown WebView message type: $type")
             }
@@ -1601,6 +1630,44 @@ class RemoteControlManager(
             is JSONArray -> node.length()
             else -> 0
         }
+    }
+
+    private fun handleNestedPassageMessage(message: Map<String, Any>) {
+        val sourceWebViewType = message["webViewType"] as? String ?: "unknown"
+        val dataMap = coerceToMap(message["data"], logErrors = false)
+        val innerType = dataMap?.get("type") as? String
+
+        if (innerType == null) {
+            PassageLogger.warn(TAG, "[$sourceWebViewType WebView] Nested message without type: ${summarizeResultValue(message["data"])}")
+            return
+        }
+
+        if (innerType == "ready") {
+            PassageLogger.info(TAG, "[$sourceWebViewType WebView] Passage bridge reported ready")
+            return
+        }
+
+        if (innerType == "CLOSE_CONFIRMED" || innerType == "CLOSE_CANCELLED") {
+            PassageLogger.debug(TAG, "[$sourceWebViewType WebView] Close confirmation handled by activity; ignoring nested message: $innerType")
+            return
+        }
+
+        PassageLogger.debug(TAG, "[$sourceWebViewType WebView] Routing nested message type: $innerType")
+
+        val forwardedMessage = mutableMapOf<String, Any>()
+        forwardedMessage.putAll(dataMap)
+        forwardedMessage["type"] = innerType
+        forwardedMessage["webViewType"] = sourceWebViewType
+
+        // Preserve command identifiers and timestamp if present on the outer message but missing inside
+        if (!forwardedMessage.containsKey("commandId") && message.containsKey("commandId")) {
+            forwardedMessage["commandId"] = message["commandId"] as Any
+        }
+        if (!forwardedMessage.containsKey("timestamp") && message.containsKey("timestamp")) {
+            forwardedMessage["timestamp"] = message["timestamp"] as Any
+        }
+
+        handleWebViewMessage(forwardedMessage)
     }
 
     private fun coerceToMap(dataObj: Any?, logErrors: Boolean = true): Map<String, Any>? {

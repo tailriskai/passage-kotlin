@@ -61,6 +61,8 @@ class PassageWebViewActivity : AppCompatActivity() {
     private var globalJavascript: String = ""
     private var automationUserAgent: String? = null
     private var integrationUrl: String? = null
+    private var closeButtonPressCount = 0
+    private var wasShowingAutomationBeforeClose = false
 
     // WebView clients
     private lateinit var uiWebViewClient: PassageWebViewClient
@@ -355,9 +357,17 @@ class PassageWebViewActivity : AppCompatActivity() {
             }
             else -> {
                 val url = intent.getStringExtra("url")
+                val targetWebView = intent.getStringExtra("targetWebView")
                 if (url != null) {
-                    PassageLogger.info(TAG, "Navigate to URL: $url")
-                    currentWebView?.loadUrl(url)
+                    PassageLogger.info(
+                        TAG,
+                        "Navigate to URL: ${PassageLogger.truncateUrl(url, 100)} (target=${targetWebView ?: "current"})"
+                    )
+                    when (targetWebView) {
+                        PassageConstants.WebViewTypes.UI -> uiWebView.loadUrl(url)
+                        PassageConstants.WebViewTypes.AUTOMATION -> automationWebView.loadUrl(url)
+                        else -> currentWebView?.loadUrl(url)
+                    }
                 }
             }
         }
@@ -462,14 +472,20 @@ class PassageWebViewActivity : AppCompatActivity() {
                             TAG,
                             "window.passage not ready after $passageReadyMaxRetries retries for command: $commandId. Proceeding after reinjecting bridge"
                         )
-                        automationWebView.evaluateJavascript(getJavaScriptBridge(), null)
+                        automationWebView.evaluateJavascript(
+                            getJavaScriptBridge(PassageConstants.WebViewTypes.AUTOMATION),
+                            null
+                        )
                         automationWebView.post { onReady() }
                     } else {
                         PassageLogger.warn(
                             TAG,
                             "window.passage not ready (attempt ${retryCount + 1}/$passageReadyMaxRetries) for command: $commandId. Reinforcing bridge injection"
                         )
-                        automationWebView.evaluateJavascript(getJavaScriptBridge(), null)
+                        automationWebView.evaluateJavascript(
+                            getJavaScriptBridge(PassageConstants.WebViewTypes.AUTOMATION),
+                            null
+                        )
                         automationWebView.postDelayed(
                             { ensurePassageBridgeReady(commandId, retryCount + 1, onReady) },
                             passageReadyRetryDelayMs
@@ -562,8 +578,12 @@ class PassageWebViewActivity : AppCompatActivity() {
                 }
                 messageMap["webViewType"] = webViewType
 
-                // Handle message in SDK
-                PassageSDK.handleMessage(messageMap)
+                val handledLocally = handlePassageBridgeMessage(type, messageMap)
+
+                if (!handledLocally) {
+                    // Handle message in SDK
+                    PassageSDK.handleMessage(messageMap)
+                }
 
             } catch (e: Exception) {
                 PassageLogger.error(TAG, "Error parsing JavaScript message: '$message'", e)
@@ -577,6 +597,75 @@ class PassageWebViewActivity : AppCompatActivity() {
                 "info" -> PassageLogger.info(TAG, "[WebView-$webViewType] $message")
                 "warn" -> PassageLogger.warn(TAG, "[WebView-$webViewType] $message")
                 "error" -> PassageLogger.error(TAG, "[WebView-$webViewType] $message")
+            }
+        }
+    }
+
+    private fun handlePassageBridgeMessage(type: String?, message: Map<String, Any>): Boolean {
+        val messageType = type ?: return false
+
+        return when (messageType) {
+            "CLOSE_CONFIRMED" -> {
+                handleCloseConfirmed()
+                true
+            }
+            "CLOSE_CANCELLED" -> {
+                handleCloseCancelled()
+                true
+            }
+            PassageConstants.MessageTypes.MESSAGE -> {
+                val innerType = extractInnerMessageType(message["data"])
+                when (innerType) {
+                    "CLOSE_CONFIRMED" -> {
+                        handleCloseConfirmed()
+                        true
+                    }
+                    "CLOSE_CANCELLED" -> {
+                        handleCloseCancelled()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            else -> false
+        }
+    }
+
+    private fun extractInnerMessageType(dataNode: Any?): String? {
+        return when (dataNode) {
+            is Map<*, *> -> dataNode["type"] as? String
+            is JSONObject -> dataNode.optString("type").takeIf { it.isNotBlank() }
+            is String -> {
+                val trimmed = dataNode.trim()
+                if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                    try {
+                        JSONObject(trimmed).optString("type").takeIf { it.isNotBlank() }
+                    } catch (error: Exception) {
+                        PassageLogger.warn(TAG, "Failed to parse message data JSON: ${error.message}")
+                        null
+                    }
+                } else {
+                    null
+                }
+            }
+            else -> null
+        }
+    }
+
+    private fun handleCloseConfirmed() {
+        PassageLogger.info(TAG, "[Bridge] Close confirmation received from WebView - closing modal")
+        runOnUiThread { closeModal("close_confirmed") }
+    }
+
+    private fun handleCloseCancelled() {
+        PassageLogger.info(TAG, "[Bridge] Close cancelled by user inside WebView")
+        val shouldRestoreAutomation = wasShowingAutomationBeforeClose
+
+        runOnUiThread {
+            resetCloseRequestState()
+            if (shouldRestoreAutomation) {
+                PassageLogger.info(TAG, "[Bridge] Restoring automation WebView after close cancellation")
+                showAutomationWebView()
             }
         }
     }
@@ -633,7 +722,7 @@ class PassageWebViewActivity : AppCompatActivity() {
                 onPageFinished(it)
 
                 // Inject JavaScript bridge
-                view?.evaluateJavascript(getJavaScriptBridge(), null)
+                view?.evaluateJavascript(getJavaScriptBridge(webViewType), null)
 
                 // Inject global JavaScript for automation WebView
                 if (webViewType == PassageConstants.WebViewTypes.AUTOMATION && view != null) {
@@ -713,31 +802,144 @@ class PassageWebViewActivity : AppCompatActivity() {
     }
 
     // JavaScript bridge injection
-    private fun getJavaScriptBridge(): String {
+    private fun getJavaScriptBridge(webViewType: String): String {
         return """
             (function() {
-                if (window.passage) return;
+                const JS_INTERFACE = '$JS_INTERFACE_NAME';
+                const WEB_VIEW_TYPE = '$webViewType';
+                const DEFAULT_MESSAGE_TYPE = '${PassageConstants.MessageTypes.MESSAGE}';
+                const CLOSE_MESSAGE_TYPE = '${PassageConstants.MessageTypes.CLOSE_MODAL}';
+                const NAVIGATE_MESSAGE_TYPE = '${PassageConstants.MessageTypes.NAVIGATE}';
+                const SET_TITLE_MESSAGE_TYPE = '${PassageConstants.MessageTypes.SET_TITLE}';
+                const SWITCH_WEBVIEW_MESSAGE_TYPE = '${PassageConstants.MessageTypes.SWITCH_WEBVIEW}';
+
+                function isObject(value) {
+                    return value !== null && typeof value === 'object';
+                }
+
+                function clonePayload(payload) {
+                    if (!isObject(payload)) {
+                        return payload;
+                    }
+                    try {
+                        return JSON.parse(JSON.stringify(payload));
+                    } catch (error) {
+                        console.warn('[Passage] Failed to clone payload, sending original:', error);
+                        return payload;
+                    }
+                }
+
+                function sendToNative(payload, fallbackType) {
+                    try {
+                        if (!window[JS_INTERFACE] || typeof window[JS_INTERFACE].postMessage !== 'function') {
+                            console.warn('[Passage] Native bridge not available');
+                            return;
+                        }
+
+                        let message = clonePayload(payload);
+                        if (!isObject(message)) {
+                            message = { value: message };
+                        }
+
+                        message.type = message.type || fallbackType || DEFAULT_MESSAGE_TYPE;
+                        message.webViewType = WEB_VIEW_TYPE;
+                        if (!message.timestamp) {
+                            message.timestamp = Date.now();
+                        }
+
+                        window[JS_INTERFACE].postMessage(JSON.stringify(message));
+                    } catch (error) {
+                        console.error('[Passage] Failed to send message to native:', error);
+                    }
+                }
+
+                function sendLog(level, message) {
+                    if (window[JS_INTERFACE] && typeof window[JS_INTERFACE].log === 'function') {
+                        try {
+                            window[JS_INTERFACE].log(level, message);
+                        } catch (error) {
+                            console.error('[Passage] Failed to forward log message:', error);
+                        }
+                    }
+                }
 
                 window.passage = {
+                    initialized: true,
+                    webViewType: WEB_VIEW_TYPE,
+
                     postMessage: function(data) {
-                        if (window.$JS_INTERFACE_NAME) {
-                            window.$JS_INTERFACE_NAME.postMessage(JSON.stringify(data));
-                        }
+                        sendToNative({
+                            type: DEFAULT_MESSAGE_TYPE,
+                            data: data
+                        }, DEFAULT_MESSAGE_TYPE);
                     },
-                    log: function(level, message) {
-                        if (window.$JS_INTERFACE_NAME) {
-                            window.$JS_INTERFACE_NAME.log(level, message);
-                        }
+
+                    navigate: function(url) {
+                        sendToNative({
+                            type: NAVIGATE_MESSAGE_TYPE,
+                            url: url
+                        }, NAVIGATE_MESSAGE_TYPE);
                     },
+
+                    close: function() {
+                        sendToNative({
+                            type: CLOSE_MESSAGE_TYPE
+                        }, CLOSE_MESSAGE_TYPE);
+                    },
+
+                    setTitle: function(title) {
+                        sendToNative({
+                            type: SET_TITLE_MESSAGE_TYPE,
+                            title: title
+                        }, SET_TITLE_MESSAGE_TYPE);
+                    },
+
+                    getWebViewType: function() {
+                        return WEB_VIEW_TYPE;
+                    },
+
+                    isAutomationWebView: function() {
+                        return WEB_VIEW_TYPE === '${PassageConstants.WebViewTypes.AUTOMATION}';
+                    },
+
+                    isUIWebView: function() {
+                        return WEB_VIEW_TYPE === '${PassageConstants.WebViewTypes.UI}';
+                    },
+
+                    captureScreenshot: function() {
+                        sendToNative({ type: 'captureScreenshot' }, 'captureScreenshot');
+                    },
+
+                    log: function(level) {
+                        const args = Array.prototype.slice.call(arguments, 1);
+                        const message = args.join(' ');
+                        sendLog(level, message);
+                    },
+
                     switchWebView: function(targetWebView) {
-                        window.passage.postMessage({
-                            type: 'SWITCH_WEBVIEW',
+                        sendToNative({
+                            type: SWITCH_WEBVIEW_MESSAGE_TYPE,
                             targetWebView: targetWebView
-                        });
+                        }, SWITCH_WEBVIEW_MESSAGE_TYPE);
                     }
                 };
 
-                // Override console methods for debugging
+                if (typeof window.webkit !== 'object' || window.webkit === null) {
+                    window.webkit = {};
+                }
+
+                if (typeof window.webkit.messageHandlers !== 'object' || window.webkit.messageHandlers === null) {
+                    window.webkit.messageHandlers = {};
+                }
+
+                if (!window.webkit.messageHandlers.passageWebView) {
+                    window.webkit.messageHandlers.passageWebView = {
+                        postMessage: function(payload) {
+                            sendToNative(payload, DEFAULT_MESSAGE_TYPE);
+                        }
+                    };
+                }
+
                 if (${config.debug}) {
                     const originalLog = console.log;
                     const originalError = console.error;
@@ -759,7 +961,6 @@ class PassageWebViewActivity : AppCompatActivity() {
                     };
                 }
 
-                // Send ready message
                 window.passage.postMessage({ type: 'ready' });
             })();
         """.trimIndent()
@@ -1016,16 +1217,84 @@ class PassageWebViewActivity : AppCompatActivity() {
     // Activity lifecycle
 
     override fun onBackPressed() {
-        PassageLogger.info(TAG, "Back button pressed - closing modal")
+        PassageLogger.info(TAG, "Back button pressed - initiating close flow")
 
-        // Allow back button to close the modal
-        super.onBackPressed()
+        closeButtonPressCount += 1
+        PassageLogger.info(TAG, "Close button press count: $closeButtonPressCount")
 
-        // Notify SDK that user closed the modal
+        if (closeButtonPressCount >= 2) {
+            PassageLogger.info(TAG, "Second close request detected - closing modal immediately")
+            closeModal("back_button_double_press")
+            return
+        }
+
+        requestCloseConfirmation("back_button")
+    }
+
+    private fun requestCloseConfirmation(trigger: String) {
+        PassageLogger.info(TAG, "Requesting close confirmation (trigger=$trigger)")
+
+        wasShowingAutomationBeforeClose = currentWebViewType == PassageConstants.WebViewTypes.AUTOMATION
+
+        if (wasShowingAutomationBeforeClose) {
+            PassageLogger.info(TAG, "Switching to UI WebView before showing close confirmation")
+            showUIWebView()
+        }
+
+        val confirmationScript = """
+            (function() {
+                try {
+                    if (typeof window.showCloseConfirmation === 'function') {
+                        window.showCloseConfirmation();
+                        return 'function_invoked';
+                    }
+                    if (window.passage && typeof window.passage.postMessage === 'function') {
+                        window.passage.postMessage({ type: 'CLOSE_CONFIRMATION_REQUEST' });
+                        return 'post_message';
+                    }
+                    console.log('[Passage] No close confirmation handler available');
+                    return 'no_handler';
+                } catch (error) {
+                    console.error('[Passage] Error calling close confirmation:', error);
+                    return 'error';
+                }
+            })();
+        """.trimIndent()
+
+        try {
+            uiWebView.evaluateJavascript(confirmationScript) { rawResult ->
+                val result = unquoteJavaScriptResult(rawResult)
+                PassageLogger.debug(TAG, "Close confirmation script result (trigger=$trigger): ${result ?: "null"}")
+
+                if (result == null || result == "no_handler" || result == "error") {
+                    PassageLogger.warn(TAG, "Close confirmation handler unavailable (result=${result ?: "null"}), closing immediately")
+                    closeModal("close_confirmation_unavailable")
+                }
+            }
+        } catch (error: Throwable) {
+            PassageLogger.error(TAG, "Failed to request close confirmation", error)
+            closeModal("close_confirmation_exception")
+        }
+    }
+
+    private fun closeModal(reason: String) {
+        if (isClosing) {
+            PassageLogger.warn(TAG, "Close requested ($reason) but modal is already closing")
+            return
+        }
+
+        PassageLogger.info(TAG, "Closing modal (reason=$reason)")
+
+        isClosing = true
+        resetCloseRequestState()
+
         PassageSDK.handleClose()
-
-        // Finish this activity
         finish()
+    }
+
+    private fun resetCloseRequestState() {
+        closeButtonPressCount = 0
+        wasShowingAutomationBeforeClose = false
     }
 
     override fun onDestroy() {

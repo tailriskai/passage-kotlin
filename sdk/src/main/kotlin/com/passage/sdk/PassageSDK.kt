@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.passage.sdk.analytics.PassageAnalytics
 import com.passage.sdk.logging.PassageLogger
 import com.passage.sdk.remote.RemoteControlManager
@@ -478,6 +479,29 @@ object PassageSDK {
                         }
                     }
                 }
+            }
+            PassageConstants.MessageTypes.NAVIGATE -> {
+                val url = message["url"] as? String ?: return
+                val targetWebView = message["targetWebView"] as? String
+
+                activityRef?.get()?.let { activity ->
+                    val navigateIntent = Intent(PassageConstants.BroadcastActions.NAVIGATE).apply {
+                        putExtra("url", url)
+                        targetWebView?.let { putExtra("targetWebView", it) }
+                    }
+                    LocalBroadcastManager.getInstance(activity).sendBroadcast(navigateIntent)
+                }
+            }
+            PassageConstants.MessageTypes.SET_TITLE -> {
+                val title = message["title"] as? String ?: ""
+                activityRef?.get()?.let { activity ->
+                    activity.runOnUiThread {
+                        activity.title = title
+                    }
+                }
+            }
+            "CLOSE_CONFIRMED", "CLOSE_CANCELLED" -> {
+                PassageLogger.debug("[SDK] Close confirmation message received - handled directly by WebView activity")
             }
             else -> {
                 // Forward other messages to remote control
