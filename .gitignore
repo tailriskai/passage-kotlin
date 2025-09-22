@@ -54,3 +54,9 @@ out/
 *.rej
 .idea
 /.history/
+
+# GPG keys and credentials
+private-key.asc
+gpg-key-config.txt
+*.key
+*.gpg

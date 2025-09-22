@@ -24,7 +24,7 @@ To publish the SDK to your local Maven repository for testing:
 ./scripts/publish_local.sh
 ```
 
-This generates the release AAR and installs it into `~/.m2/repository`, allowing other Android or Capacitor projects to depend on `mavenLocal()` and pull in `com.passage:sdk:0.0.1`.
+This generates the release AAR and installs it into `~/.m2/repository`, allowing other Android or Capacitor projects to depend on `mavenLocal()` and pull in `ai.trypassage:sdk:0.0.1`.
 
 To publish to a remote Maven repository, export the following environment variables (or set matching Gradle properties) and run:
 
@@ -44,7 +44,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.passage:sdk:0.0.1")
+    implementation("ai.trypassage:sdk:0.0.1")
 }
 ```
 

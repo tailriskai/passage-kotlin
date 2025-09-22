@@ -2,13 +2,14 @@ plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("maven-publish")
+    id("signing")
 }
 
-group = project.findProperty("PUBLISHING_GROUP") as? String ?: "com.passage"
-version = project.findProperty("PUBLISHING_VERSION") as? String ?: "0.0.1"
+group = project.findProperty("PUBLISHING_GROUP") as? String ?: "ai.trypassage"
+version = project.findProperty("PUBLISHING_VERSION") as? String ?: "1.0.0"
 
-val publishingGroup = project.findProperty("PUBLISHING_GROUP") as? String ?: "com.passage"
-val publishingArtifact = project.findProperty("PUBLISHING_ARTIFACT") as? String ?: "sdk"
+val publishingGroup = project.findProperty("PUBLISHING_GROUP") as? String ?: "ai.trypassage"
+val publishingArtifact = project.findProperty("PUBLISHING_ARTIFACT") as? String ?: "android-sdk"
 val publishingVersion = project.findProperty("PUBLISHING_VERSION") as? String ?: "0.0.1"
 val pomName = project.findProperty("POM_NAME") as? String ?: "Passage Kotlin SDK"
 val pomDescription = project.findProperty("POM_DESCRIPTION") as? String ?: "Native Android SDK for Passage"
@@ -134,11 +135,28 @@ publishing {
 
     repositories {
         maven {
+            name = "sonatype"
+            val isSnapshot = version.toString().endsWith("SNAPSHOT")
+            url = if (isSnapshot) {
+                uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+            } else {
+                uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
+            }
+
+            credentials {
+                username = project.findProperty("ossrhUsername") as? String
+                    ?: System.getenv("OSSRH_USERNAME")
+                password = project.findProperty("ossrhPassword") as? String
+                    ?: System.getenv("OSSRH_PASSWORD")
+            }
+        }
+
+        maven {
             name = "Passage"
             val configuredUrl = (project.findProperty("passageMavenUrl") as? String)
                 ?: System.getenv("PASSAGE_MAVEN_URL")
             val repoUri = configuredUrl?.takeIf { it.isNotBlank() }?.let { uri(it) }
-                ?: uri("${project.buildDir}/repo")
+                ?: uri("${project.layout.buildDirectory.get().asFile}/repo")
             url = repoUri
 
             credentials {
@@ -153,4 +171,19 @@ publishing {
             isAllowInsecureProtocol = repoUri.scheme == "http"
         }
     }
+}
+
+signing {
+    isRequired = false
+
+    val signingKey = System.getenv("GPG_SIGNING_KEY")
+    val signingPassword = System.getenv("GPG_SIGNING_PASSWORD")
+
+    if (!signingKey.isNullOrEmpty() && !signingPassword.isNullOrEmpty()) {
+        useInMemoryPgpKeys(signingKey, signingPassword)
+    } else {
+        useGpgCmd()
+    }
+
+    sign(publishing.publications["release"])
 }
