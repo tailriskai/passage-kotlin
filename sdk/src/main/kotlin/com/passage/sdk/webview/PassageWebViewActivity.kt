@@ -438,24 +438,37 @@ class PassageWebViewActivity : AppCompatActivity() {
                     val success = when (unquotedResult) {
                         null -> false
                         "null" -> false
-                        "true" -> true
                         "false" -> false
+                        "undefined" -> true  // Click/input commands return undefined on success
+                        "true" -> true
                         else -> true // Non-null result indicates success for sync scripts
                     }
 
                     PassageLogger.info(TAG, "Sync command $commandId success: $success")
 
-                    // Send result via LocalBroadcastManager
-                    val resultIntent = Intent(PassageConstants.BroadcastActions.SCRIPT_EXECUTION_RESULT).apply {
-                        putExtra("commandId", commandId)
-                        putExtra("success", success)
-                        if (success) {
-                            putExtra("result", unquotedResult)
-                        } else {
-                            putExtra("error", unquotedResult ?: "Script execution failed")
+                    // Check if this is a command type that sends its own result via postMessage
+                    // Click and input commands handle their own results via window.passage.postMessage
+                    val isCommandHandledByPostMessage = commandType.equals("Click", ignoreCase = true) ||
+                                                       commandType.equals("Input", ignoreCase = true)
+
+                    if (!isCommandHandledByPostMessage) {
+                        // Only send result for commands that don't handle their own results
+                        PassageLogger.debug(TAG, "Sending sync script result for $commandType command")
+
+                        // Send result via LocalBroadcastManager
+                        val resultIntent = Intent(PassageConstants.BroadcastActions.SCRIPT_EXECUTION_RESULT).apply {
+                            putExtra("commandId", commandId)
+                            putExtra("success", success)
+                            if (success) {
+                                putExtra("result", unquotedResult)
+                            } else {
+                                putExtra("error", unquotedResult ?: "Script execution failed")
+                            }
                         }
+                        LocalBroadcastManager.getInstance(this@PassageWebViewActivity).sendBroadcast(resultIntent)
+                    } else {
+                        PassageLogger.debug(TAG, "Skipping sync script result for $commandType - will be handled by postMessage")
                     }
-                    LocalBroadcastManager.getInstance(this@PassageWebViewActivity).sendBroadcast(resultIntent)
                 }
             }
         }

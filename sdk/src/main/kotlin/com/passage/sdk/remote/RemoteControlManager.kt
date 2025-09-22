@@ -1805,6 +1805,46 @@ class RemoteControlManager(
             "message" -> {
                 handleNestedPassageMessage(message)
             }
+            "click" -> {
+                // Handle click command results
+                val commandId = message["commandId"] as? String ?: return
+                val success = message["success"] as? Boolean ?: true
+                val result = message["result"]
+
+                PassageLogger.info(TAG, "Click command result: $commandId -> success=$success")
+
+                if (success) {
+                    launchInScope("clickCommandSuccess:$commandId") {
+                        val pageData = collectPageData()
+                        sendCommandResultHttp(commandId, "success", result, pageData, null)
+                    }
+                } else {
+                    val error = message["error"] as? String ?: "Click command failed"
+                    launchInScope("clickCommandError:$commandId") {
+                        sendCommandResultHttp(commandId, "error", null, null, error)
+                    }
+                }
+            }
+            "input" -> {
+                // Handle input command results
+                val commandId = message["commandId"] as? String ?: return
+                val success = message["success"] as? Boolean ?: true
+                val result = message["result"]
+
+                PassageLogger.info(TAG, "Input command result: $commandId -> success=$success")
+
+                if (success) {
+                    launchInScope("inputCommandSuccess:$commandId") {
+                        val pageData = collectPageData()
+                        sendCommandResultHttp(commandId, "success", result, pageData, null)
+                    }
+                } else {
+                    val error = message["error"] as? String ?: "Input command failed"
+                    launchInScope("inputCommandError:$commandId") {
+                        sendCommandResultHttp(commandId, "error", null, null, error)
+                    }
+                }
+            }
             else -> {
                 PassageLogger.warn(TAG, "Unknown WebView message type: $type")
             }
