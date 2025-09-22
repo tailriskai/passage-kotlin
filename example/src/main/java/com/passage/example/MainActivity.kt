@@ -83,8 +83,8 @@ class MainActivity : AppCompatActivity() {
     private var isManualMode: Boolean = false
     private var isLoadingIntegrations: Boolean = false
 
-    private val apiBaseUrl = "http://10.0.2.2:3000"
-    private val uiBaseUrl = "http://10.0.2.2:3001"
+    private val apiBaseUrl = "https://api.runpassage.ai"
+    private val uiBaseUrl = "https://ui.runpassage.ai"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

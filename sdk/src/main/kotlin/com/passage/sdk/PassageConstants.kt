@@ -63,11 +63,11 @@ object PassageConstants {
     object Defaults {
         const val MODAL_TITLE = ""
         const val SHOW_GRABBER = false
-        const val BASE_URL = "http://10.0.2.2:3001"
-        const val SOCKET_URL = "http://10.0.2.2:3000"
+        const val BASE_URL = "https://ui.runpassage.ai"
+        const val SOCKET_URL = "https://api.runpassage.ai"
         const val SOCKET_NAMESPACE = "/ws"
-        const val LOGGER_ENDPOINT = "http://10.0.2.2:3001/api/logger"
-        const val ANALYTICS_ENDPOINT = "http://10.0.2.2:3000/analytics"
+        const val LOGGER_ENDPOINT = "https://ui.runpassage.ai/api/logger"
+        const val ANALYTICS_ENDPOINT = "https://api.runpassage.ai/analytics"
         const val AGENT_NAME = "passage-swift"
         const val SDK_VERSION = "1.0.0"
     }

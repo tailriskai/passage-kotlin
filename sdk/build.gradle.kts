@@ -4,6 +4,23 @@ plugins {
     id("maven-publish")
 }
 
+group = project.findProperty("PUBLISHING_GROUP") as? String ?: "com.passage"
+version = project.findProperty("PUBLISHING_VERSION") as? String ?: "0.0.1"
+
+val publishingGroup = project.findProperty("PUBLISHING_GROUP") as? String ?: "com.passage"
+val publishingArtifact = project.findProperty("PUBLISHING_ARTIFACT") as? String ?: "sdk"
+val publishingVersion = project.findProperty("PUBLISHING_VERSION") as? String ?: "0.0.1"
+val pomName = project.findProperty("POM_NAME") as? String ?: "Passage Kotlin SDK"
+val pomDescription = project.findProperty("POM_DESCRIPTION") as? String ?: "Native Android SDK for Passage"
+val pomUrl = project.findProperty("POM_URL") as? String ?: "https://github.com/tailriskai/passage-kotlin"
+val pomLicenseName = project.findProperty("POM_LICENSE_NAME") as? String ?: "MIT License"
+val pomLicenseUrl = project.findProperty("POM_LICENSE_URL") as? String ?: "https://opensource.org/licenses/MIT"
+val pomDeveloperName = project.findProperty("POM_DEVELOPER_NAME") as? String ?: "Passage"
+val pomDeveloperEmail = project.findProperty("POM_DEVELOPER_EMAIL") as? String ?: "support@trypassage.ai"
+val pomScmUrl = project.findProperty("POM_SCM_URL") as? String ?: pomUrl
+val pomScmConnection = project.findProperty("POM_SCM_CONNECTION") as? String ?: "scm:git:$pomUrl.git"
+val pomScmDevConnection = project.findProperty("POM_SCM_DEV_CONNECTION") as? String ?: pomScmConnection
+
 android {
     namespace = "com.passage.sdk"
     compileSdk = 34
@@ -44,6 +61,12 @@ android {
     buildFeatures {
         viewBinding = true
     }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
 }
 
 dependencies {
@@ -73,13 +96,61 @@ dependencies {
 publishing {
     publications {
         register<MavenPublication>("release") {
-            groupId = "com.passage"
-            artifactId = "sdk"
-            version = "1.0.0"
+            groupId = publishingGroup
+            artifactId = publishingArtifact
+            version = publishingVersion
 
             afterEvaluate {
                 from(components["release"])
             }
+
+            pom {
+                name.set(pomName)
+                description.set(pomDescription)
+                url.set(pomUrl)
+
+                licenses {
+                    license {
+                        name.set(pomLicenseName)
+                        url.set(pomLicenseUrl)
+                    }
+                }
+
+                developers {
+                    developer {
+                        name.set(pomDeveloperName)
+                        email.set(pomDeveloperEmail)
+                    }
+                }
+
+                scm {
+                    url.set(pomScmUrl)
+                    connection.set(pomScmConnection)
+                    developerConnection.set(pomScmDevConnection)
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = "Passage"
+            val configuredUrl = (project.findProperty("passageMavenUrl") as? String)
+                ?: System.getenv("PASSAGE_MAVEN_URL")
+            val repoUri = configuredUrl?.takeIf { it.isNotBlank() }?.let { uri(it) }
+                ?: uri("${project.buildDir}/repo")
+            url = repoUri
+
+            credentials {
+                val configuredUsername = (project.findProperty("passageMavenUsername") as? String)
+                    ?: System.getenv("PASSAGE_MAVEN_USERNAME")
+                val configuredPassword = (project.findProperty("passageMavenPassword") as? String)
+                    ?: System.getenv("PASSAGE_MAVEN_PASSWORD")
+                username = configuredUsername
+                password = configuredPassword
+            }
+
+            isAllowInsecureProtocol = repoUri.scheme == "http"
         }
     }
 }
