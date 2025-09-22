@@ -69,7 +69,7 @@ object PassageConstants {
         const val LOGGER_ENDPOINT = "https://ui.runpassage.ai/api/logger"
         const val ANALYTICS_ENDPOINT = "https://api.runpassage.ai/analytics"
         const val AGENT_NAME = "passage-swift"
-        const val SDK_VERSION = "1.0.0"
+        const val SDK_VERSION = "0.0.2"
     }
 
     // Error domains
