@@ -28,6 +28,36 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
+// Extension function to convert JSONObject to Map
+private fun JSONObject.toMap(): Map<String, Any> {
+    val map = mutableMapOf<String, Any>()
+    keys().forEach { key ->
+        val keyString = key as? String ?: return@forEach
+        get(key)?.let { value ->
+            map[keyString] = when (value) {
+                is JSONObject -> value.toMap()
+                is JSONArray -> value.toList()
+                else -> value
+            }
+        }
+    }
+    return map
+}
+
+// Extension function to convert JSONArray to List
+private fun JSONArray.toList(): List<Any> {
+    val list = mutableListOf<Any>()
+    for (i in 0 until length()) {
+        val value = get(i)
+        list.add(when (value) {
+            is JSONObject -> value.toMap()
+            is JSONArray -> value.toList()
+            else -> value
+        })
+    }
+    return list
+}
+
 /**
  * Manages Socket.IO communication and command processing
  * Matches the Swift SDK's RemoteControlManager implementation
@@ -460,6 +490,138 @@ class RemoteControlManager(
             handleErrorEvent(args)
         }
 
+        // Handle CONNECTION_SUCCESS events from socket (matching Swift SDK)
+        socket.on("CONNECTION_SUCCESS") { args ->
+            PassageLogger.info(TAG, "🎉 CONNECTION_SUCCESS event received")
+            PassageLogger.debug(TAG, "Connection success data: ${args.contentToString()}")
+
+            try {
+                val eventData = args[0] as? JSONObject
+                if (eventData != null) {
+                    val connectionsArray = eventData.optJSONArray("connections")
+                    val connectionId = eventData.optString("connectionId", "")
+
+                    val connections = mutableListOf<Map<String, Any>>()
+                    if (connectionsArray != null) {
+                        for (i in 0 until connectionsArray.length()) {
+                            val item = connectionsArray.getJSONObject(i)
+                            val map = mutableMapOf<String, Any>()
+                            item.keys().forEach { key ->
+                                val keyString = key as? String ?: return@forEach
+                                item.get(key)?.let { value ->
+                                    map[keyString] = value
+                                }
+                            }
+                            connections.add(map)
+                        }
+                    }
+
+                    val successData = PassageSuccessData(
+                        history = connections.map { item ->
+                            PassageHistoryItem(structuredData = item, additionalData = emptyMap())
+                        },
+                        connectionId = connectionId
+                    )
+                    // Skip calling onSuccess here - onConnectionComplete should only be called from done command
+                    // onSuccess?.invoke(successData)
+                    PassageLogger.info(TAG, "CONNECTION_SUCCESS data received but not calling onSuccess - will be handled by done command")
+                }
+            } catch (e: Exception) {
+                PassageLogger.error(TAG, "Error handling CONNECTION_SUCCESS event", e)
+            }
+        }
+
+        // Handle CONNECTION_ERROR events from socket (matching Swift SDK)
+        socket.on("CONNECTION_ERROR") { args ->
+            PassageLogger.error(TAG, "❌ CONNECTION_ERROR event received")
+            PassageLogger.error(TAG, "Connection error data: ${args.contentToString()}")
+
+            try {
+                val eventData = args[0] as? JSONObject
+                if (eventData != null) {
+                    val error = eventData.optString("error", "Unknown error")
+                    val errorData = PassageErrorData(error, eventData.toMap())
+                    onError?.invoke(errorData)
+                }
+            } catch (e: Exception) {
+                PassageLogger.error(TAG, "Error handling CONNECTION_ERROR event", e)
+            }
+        }
+
+        // Handle DATA_COMPLETE events (matching Swift SDK)
+        socket.on("DATA_COMPLETE") { args ->
+            PassageLogger.info(TAG, "📊 DATA_COMPLETE event received")
+            PassageLogger.debug(TAG, "Data complete data: ${args.contentToString()}")
+
+            try {
+                val eventData = args[0] as? JSONObject
+                if (eventData != null) {
+                    // Check if data state allows onDataComplete to be called
+                    val status = eventData.optString("status")
+                    PassageLogger.debug(TAG, "Data complete status: $status")
+
+                    // Only call onDataComplete when data is available or partially available
+                    if (status == "data_available" || status == "data_partially_available") {
+                        PassageLogger.info(TAG, "Status allows onDataComplete - calling callback")
+
+                        val dataValue = eventData.opt("data")
+                        val promptsArray = eventData.optJSONArray("prompts")
+
+                        val prompts = mutableListOf<Map<String, Any>>()
+                        if (promptsArray != null) {
+                            for (i in 0 until promptsArray.length()) {
+                                val item = promptsArray.getJSONObject(i)
+                                val map = mutableMapOf<String, Any>()
+                                item.keys().forEach { key ->
+                                    val keyString = key as? String ?: return@forEach
+                                    item.get(key)?.let { value ->
+                                        map[keyString] = value
+                                    }
+                                }
+                                prompts.add(map)
+                            }
+                        }
+
+                        val dataResult = PassageDataResult(
+                            data = dataValue,
+                            prompts = if (prompts.isNotEmpty()) prompts else null
+                        )
+                        onDataComplete?.invoke(dataResult)
+                    } else {
+                        PassageLogger.info(TAG, "Status '$status' does not allow onDataComplete - skipping callback")
+                    }
+                }
+            } catch (e: Exception) {
+                PassageLogger.error(TAG, "Error handling DATA_COMPLETE event", e)
+            }
+        }
+
+        // Handle PROMPT_COMPLETE events (matching Swift SDK)
+        socket.on("PROMPT_COMPLETE") { args ->
+            PassageLogger.info(TAG, "🎯 PROMPT_COMPLETE event received")
+            PassageLogger.debug(TAG, "Prompt complete data: ${args.contentToString()}")
+
+            try {
+                val eventData = args[0] as? JSONObject
+                if (eventData != null) {
+                    val key = eventData.optString("key", "")
+                    val value = eventData.optString("value", "")
+                    val response = eventData.opt("response")
+
+                    if (key.isNotEmpty() && value.isNotEmpty()) {
+                        val promptResponse = PassagePromptResponse(
+                            key = key,
+                            value = value,
+                            response = response
+                        )
+                        onPromptComplete?.invoke(promptResponse)
+                    }
+                }
+            } catch (e: Exception) {
+                PassageLogger.error(TAG, "Error handling PROMPT_COMPLETE event", e)
+            }
+        }
+
         socket.on("disconnect") { args ->
             PassageLogger.info(TAG, "Server requested disconnect")
             PassageLogger.info(TAG, "Server disconnect args: ${args.contentToString()}")
@@ -764,6 +926,12 @@ class RemoteControlManager(
         if (command.success) {
             PassageLogger.info(TAG, "✅ AUTHENTICATION SUCCESS - Done command marked as success")
 
+            // Log the raw command.data first
+            PassageLogger.info(TAG, "========== RAW DONE COMMAND DATA ==========")
+            PassageLogger.info(TAG, "command.data type: ${command.data?.javaClass?.simpleName}")
+            PassageLogger.info(TAG, "command.data: ${command.data}")
+            PassageLogger.info(TAG, "============================================")
+
             // Use async page data collection for done command like Swift
             launchInScope("doneCommandSuccess") {
                 val pageData = collectPageData()
@@ -771,18 +939,51 @@ class RemoteControlManager(
                 // Send success command result
                 sendCommandResultHttp(command.id, "success", command.data, pageData, null)
 
-                // Parse data into PassageSuccessData format (matching Swift parseHistoryFromDoneCommand)
-                val history = parseHistoryFromDoneCommand(command.data)
-                val commandData = command.data as? Map<String, Any>
+                // Convert command.data to Map - it could be JSONObject or already a Map
+                val commandData = when (command.data) {
+                    is JSONObject -> (command.data as JSONObject).toMap()
+                    is Map<*, *> -> {
+                        @Suppress("UNCHECKED_CAST")
+                        command.data as Map<String, Any>
+                    }
+                    else -> null
+                }
+
                 val connectionId = commandData?.get("connectionId") as? String ?: ""
 
+                // Get history array directly from commandData["history"]
+                val historyData = when (val historyField = commandData?.get("history")) {
+                    is JSONArray -> historyField.toList().mapNotNull { it as? Map<String, Any> }
+                    is List<*> -> {
+                        @Suppress("UNCHECKED_CAST")
+                        historyField as? List<Map<String, Any>> ?: emptyList()
+                    }
+                    else -> emptyList()
+                }
+
                 PassageLogger.info(TAG, "Extracted connectionId: $connectionId")
-                PassageLogger.info(TAG, "Parsed ${history.size} history items")
+                PassageLogger.info(TAG, "Found ${historyData.size} history items")
+
+                val history = historyData.map { item ->
+                    PassageHistoryItem(
+                        structuredData = item,
+                        additionalData = emptyMap()
+                    )
+                }
 
                 val successData = PassageSuccessData(
                     history = history,
                     connectionId = connectionId
                 )
+
+                PassageLogger.info(TAG, "========== SUCCESS DATA ==========")
+                PassageLogger.info(TAG, "successData.connectionId: $connectionId")
+                PassageLogger.info(TAG, "successData.history.size: ${history.size}")
+                history.forEachIndexed { index, item ->
+                    PassageLogger.info(TAG, "History item #$index: ${item.structuredData}")
+                }
+                PassageLogger.info(TAG, "Full successData: $successData")
+                PassageLogger.info(TAG, "===================================")
 
                 PassageLogger.info(TAG, "About to call onSuccess callback")
                 onSuccess?.invoke(successData)
