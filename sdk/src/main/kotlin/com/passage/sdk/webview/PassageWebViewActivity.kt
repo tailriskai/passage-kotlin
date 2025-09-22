@@ -613,6 +613,10 @@ class PassageWebViewActivity : AppCompatActivity() {
                 handleCloseCancelled()
                 true
             }
+            "PASSAGE_MODAL_CLOSE" -> {
+                handleJsRequestedClose()
+                true
+            }
             PassageConstants.MessageTypes.MESSAGE -> {
                 val innerType = extractInnerMessageType(message["data"])
                 when (innerType) {
@@ -622,6 +626,10 @@ class PassageWebViewActivity : AppCompatActivity() {
                     }
                     "CLOSE_CANCELLED" -> {
                         handleCloseCancelled()
+                        true
+                    }
+                    "PASSAGE_MODAL_CLOSE" -> {
+                        handleJsRequestedClose()
                         true
                     }
                     else -> false
@@ -650,6 +658,11 @@ class PassageWebViewActivity : AppCompatActivity() {
             }
             else -> null
         }
+    }
+
+    private fun handleJsRequestedClose() {
+        PassageLogger.info(TAG, "[Bridge] PASSAGE_MODAL_CLOSE event received - closing modal immediately")
+        runOnUiThread { closeModal("js_post_message") }
     }
 
     private fun handleCloseConfirmed() {
@@ -938,6 +951,46 @@ class PassageWebViewActivity : AppCompatActivity() {
                             sendToNative(payload, DEFAULT_MESSAGE_TYPE);
                         }
                     };
+                }
+
+                if (!window.__passageMessageHandlerInstalled) {
+                    const PASSAGE_MODAL_CLOSE_EVENT = 'PASSAGE_MODAL_CLOSE';
+
+                    function resolveEventType(data) {
+                        if (!data) { return null; }
+                        if (typeof data === 'string') {
+                            try {
+                                const parsed = JSON.parse(data);
+                                if (parsed && typeof parsed === 'object' && parsed.type) {
+                                    return parsed.type;
+                                }
+                            } catch (parseError) {
+                                // String was not JSON; treat the string itself as the type
+                            }
+                            return data;
+                        }
+                        if (typeof data === 'object') {
+                            return data.type || null;
+                        }
+                        return null;
+                    }
+
+                    function handleWindowMessage(event) {
+                        try {
+                            const eventType = resolveEventType(event && event.data);
+                            if (eventType === PASSAGE_MODAL_CLOSE_EVENT) {
+                                sendToNative({
+                                    type: CLOSE_MESSAGE_TYPE,
+                                    reason: 'js_post_message'
+                                }, CLOSE_MESSAGE_TYPE);
+                            }
+                        } catch (error) {
+                            console.error('[Passage] Failed to process window message:', error);
+                        }
+                    }
+
+                    window.addEventListener('message', handleWindowMessage, false);
+                    window.__passageMessageHandlerInstalled = true;
                 }
 
                 if (${config.debug}) {

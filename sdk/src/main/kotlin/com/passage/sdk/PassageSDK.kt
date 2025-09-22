@@ -284,7 +284,7 @@ object PassageSDK {
             val intent = Intent(PassageConstants.BroadcastActions.NAVIGATE).apply {
                 putExtra("action", "close")
             }
-            activity.sendBroadcast(intent)
+            LocalBroadcastManager.getInstance(activity).sendBroadcast(intent)
         }
 
         PassageLogger.info("[SDK] Navigation controller dismissed (programmatic)")
