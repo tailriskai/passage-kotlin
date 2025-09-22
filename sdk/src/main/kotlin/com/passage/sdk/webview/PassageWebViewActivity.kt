@@ -1269,6 +1269,7 @@ class PassageWebViewActivity : AppCompatActivity() {
 
     // Activity lifecycle
 
+    @Suppress("MissingSuperCall")
     override fun onBackPressed() {
         PassageLogger.info(TAG, "Back button pressed - initiating close flow")
 
