@@ -1,26 +1,10 @@
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
-    id("maven-publish")
-    id("signing")
 }
 
-group = project.findProperty("PUBLISHING_GROUP") as? String ?: "ai.trypassage"
-version = project.findProperty("PUBLISHING_VERSION") as? String ?: "1.0.0"
-
-val publishingGroup = project.findProperty("PUBLISHING_GROUP") as? String ?: "ai.trypassage"
-val publishingArtifact = project.findProperty("PUBLISHING_ARTIFACT") as? String ?: "android-sdk"
-val publishingVersion = project.findProperty("PUBLISHING_VERSION") as? String ?: "0.0.1"
-val pomName = project.findProperty("POM_NAME") as? String ?: "Passage Kotlin SDK"
-val pomDescription = project.findProperty("POM_DESCRIPTION") as? String ?: "Native Android SDK for Passage"
-val pomUrl = project.findProperty("POM_URL") as? String ?: "https://github.com/tailriskai/passage-kotlin"
-val pomLicenseName = project.findProperty("POM_LICENSE_NAME") as? String ?: "MIT License"
-val pomLicenseUrl = project.findProperty("POM_LICENSE_URL") as? String ?: "https://opensource.org/licenses/MIT"
-val pomDeveloperName = project.findProperty("POM_DEVELOPER_NAME") as? String ?: "Passage"
-val pomDeveloperEmail = project.findProperty("POM_DEVELOPER_EMAIL") as? String ?: "support@trypassage.ai"
-val pomScmUrl = project.findProperty("POM_SCM_URL") as? String ?: pomUrl
-val pomScmConnection = project.findProperty("POM_SCM_CONNECTION") as? String ?: "scm:git:$pomUrl.git"
-val pomScmDevConnection = project.findProperty("POM_SCM_DEV_CONNECTION") as? String ?: pomScmConnection
+group = "com.github.tailriskai"
+version = "1.0.0"
 
 android {
     namespace = "com.passage.sdk"
@@ -62,12 +46,6 @@ android {
     buildFeatures {
         viewBinding = true
     }
-
-    publishing {
-        singleVariant("release") {
-            withSourcesJar()
-        }
-    }
 }
 
 dependencies {
@@ -92,98 +70,4 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
-}
-
-publishing {
-    publications {
-        register<MavenPublication>("release") {
-            groupId = publishingGroup
-            artifactId = publishingArtifact
-            version = publishingVersion
-
-            afterEvaluate {
-                from(components["release"])
-            }
-
-            pom {
-                name.set(pomName)
-                description.set(pomDescription)
-                url.set(pomUrl)
-
-                licenses {
-                    license {
-                        name.set(pomLicenseName)
-                        url.set(pomLicenseUrl)
-                    }
-                }
-
-                developers {
-                    developer {
-                        name.set(pomDeveloperName)
-                        email.set(pomDeveloperEmail)
-                    }
-                }
-
-                scm {
-                    url.set(pomScmUrl)
-                    connection.set(pomScmConnection)
-                    developerConnection.set(pomScmDevConnection)
-                }
-            }
-        }
-    }
-
-    repositories {
-        maven {
-            name = "sonatype"
-            val isSnapshot = version.toString().endsWith("SNAPSHOT")
-            url = if (isSnapshot) {
-                uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
-            } else {
-                uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-            }
-
-            credentials {
-                username = project.findProperty("ossrhUsername") as? String
-                    ?: System.getenv("OSSRH_USERNAME")
-                password = project.findProperty("ossrhPassword") as? String
-                    ?: System.getenv("OSSRH_PASSWORD")
-            }
-        }
-
-        maven {
-            name = "Passage"
-            val configuredUrl = (project.findProperty("passageMavenUrl") as? String)
-                ?: System.getenv("PASSAGE_MAVEN_URL")
-            val repoUri = configuredUrl?.takeIf { it.isNotBlank() }?.let { uri(it) }
-                ?: uri("${project.layout.buildDirectory.get().asFile}/repo")
-            url = repoUri
-
-            credentials {
-                val configuredUsername = (project.findProperty("passageMavenUsername") as? String)
-                    ?: System.getenv("PASSAGE_MAVEN_USERNAME")
-                val configuredPassword = (project.findProperty("passageMavenPassword") as? String)
-                    ?: System.getenv("PASSAGE_MAVEN_PASSWORD")
-                username = configuredUsername
-                password = configuredPassword
-            }
-
-            isAllowInsecureProtocol = repoUri.scheme == "http"
-        }
-    }
-}
-
-signing {
-    isRequired = false
-
-    val signingKey = System.getenv("GPG_SIGNING_KEY")
-    val signingPassword = System.getenv("GPG_SIGNING_PASSWORD")
-
-    if (!signingKey.isNullOrEmpty() && !signingPassword.isNullOrEmpty()) {
-        useInMemoryPgpKeys(signingKey, signingPassword)
-    } else {
-        useGpgCmd()
-    }
-
-    sign(publishing.publications["release"])
 }
