@@ -70,6 +70,7 @@ class RemoteControlManager(
     private var currentCommand: RemoteCommand? = null
     private var lastUserActionCommand: RemoteCommand? = null
     private var lastWaitCommand: RemoteCommand? = null
+    private var executingWaitCommand: RemoteCommand? = null  // Track currently executing wait command
     private var currentWebViewType: String = PassageConstants.WebViewTypes.UI
 
     // Success URLs for navigation
@@ -713,6 +714,20 @@ class RemoteControlManager(
         val scriptPreview = if (script.length > 200) script.substring(0, 200) + "..." else script
         PassageLogger.debug(TAG, "Script preview: $scriptPreview")
 
+        // Store wait commands for reinjection after navigation
+        // This matches Swift behavior where wait commands persist across page transitions
+        if (command is RemoteCommand.Wait) {
+            lastWaitCommand = command
+            executingWaitCommand = command  // Mark as currently executing
+            PassageLogger.debug(TAG, "[REMOTE CONTROL] Stored wait command for potential reinjection: ${command.id}")
+        }
+
+        // Store user action commands for potential re-execution
+        if (command.userActionRequired == true) {
+            lastUserActionCommand = command
+            PassageLogger.debug(TAG, "[REMOTE CONTROL] Stored user action command: ${command.id}")
+        }
+
         // Add console logging to the script
         val scriptWithLogging = """
             console.log('[Passage] Executing ${command.javaClass.simpleName} command: ${command.id}');
@@ -724,12 +739,6 @@ class RemoteControlManager(
                 throw error;
             }
         """.trimIndent()
-
-        // Store wait commands for reinjection (but not InjectScript commands)
-        if (command is RemoteCommand.Wait) {
-            lastWaitCommand = command
-            PassageLogger.debug(TAG, "Stored Wait command for potential re-execution: ${command.id}")
-        }
 
         // Send script injection broadcast with command details
         sendBroadcast(PassageConstants.BroadcastActions.INJECT_SCRIPT, mapOf(
@@ -1308,26 +1317,36 @@ class RemoteControlManager(
     // Navigation handling
 
     fun handleNavigationComplete(url: String) {
-        PassageLogger.debug(TAG, "Navigation complete: $url")
+        PassageLogger.debug(TAG, "[REMOTE CONTROL] Navigation complete called for URL: ${PassageLogger.truncateUrl(url, 100)}")
 
+        // Clear any executing wait command since navigation invalidates it
+        executingWaitCommand?.let {
+            PassageLogger.debug(TAG, "[REMOTE CONTROL] Clearing executing wait command due to navigation: ${it.id}")
+            executingWaitCommand = null
+        }
+
+        // Handle navigation command completion
         currentCommand?.let { command ->
             if (command is RemoteCommand.Navigate) {
+                PassageLogger.info(TAG, "[REMOTE CONTROL] Completing navigation command: ${command.id}")
                 // Collect page data before sending result so backend receives pageData
                 launchInScope("navigationComplete:${command.id}") {
                     val pageData = collectPageData()
                     sendCommandResultHttp(command.id, "success", mapOf("url" to url), pageData, null)
                 }
                 currentCommand = null
+            }
+        }
 
-                // Only re-inject wait command after a Navigate command completion
-                // This ensures wait commands are re-executed on actual navigation changes
-                lastWaitCommand?.let { waitCommand ->
-                    PassageLogger.info(TAG, "Re-injecting wait command after navigation change: ${waitCommand.id}")
-                    launchInScope("reinjectWait:${waitCommand.id}") {
-                        delay(1000) // Give page time to load
-                        executeScriptCommand(waitCommand)
-                    }
-                }
+        // Check if we need to reinject a wait command after navigation
+        // This matches Swift behavior - reinject after ANY navigation, not just Navigate commands
+        lastWaitCommand?.let { waitCommand ->
+            PassageLogger.info(TAG, "[REMOTE CONTROL] Re-injecting wait command after navigation: ${waitCommand.id}")
+
+            // Add a delay to ensure page is fully loaded before reinjecting
+            launchInScope("reinjectWait:${waitCommand.id}") {
+                delay(1000) // 1 second delay matches Swift: DispatchQueue.main.asyncAfter(deadline: .now() + 1.0)
+                executeScriptCommand(waitCommand)
             }
         }
     }
@@ -1339,14 +1358,29 @@ class RemoteControlManager(
         val success = intent.getBooleanExtra("success", false)
         val result = intent.getStringExtra("result")
 
-        PassageLogger.info(TAG, "Script execution result for $commandId: success=$success")
+        PassageLogger.info(TAG, "[REMOTE CONTROL] Script execution result for command: $commandId, success: $success")
+
+        // Clear wait command if it completed (successfully or not) - matches Swift behavior
+        lastWaitCommand?.let { waitCommand ->
+            if (waitCommand.id == commandId) {
+                PassageLogger.debug(TAG, "[REMOTE CONTROL] Clearing completed wait command: $commandId")
+                lastWaitCommand = null
+            }
+        }
+        executingWaitCommand?.let { waitCommand ->
+            if (waitCommand.id == commandId) {
+                PassageLogger.debug(TAG, "[REMOTE CONTROL] Clearing executing wait command: $commandId")
+                executingWaitCommand = null
+            }
+        }
 
         launchInScope("scriptResult:$commandId") {
-            val pageData = collectPageData()
             if (success) {
+                val pageData = collectPageData()
                 sendCommandResultHttp(commandId, "success", result, pageData, null)
             } else {
-                sendCommandResultHttp(commandId, "error", null, null, "Script execution failed")
+                val error = intent.getStringExtra("error") ?: "Script execution failed"
+                sendCommandResultHttp(commandId, "error", null, null, error)
             }
         }
     }
@@ -1420,14 +1454,24 @@ class RemoteControlManager(
                 // Handle Wait command results (sent by injected scripts)
                 val commandId = message["commandId"] as? String ?: return
                 val value = message["value"] as? Boolean ?: false
-                val result = message["result"] as? String
+                var result = message["result"]
 
-                PassageLogger.info(TAG, "Wait command result: $commandId -> value=$value")
+                // Handle undefined/null result for successful wait commands (common after reinjection)
+                if (value && result == null) {
+                    result = true  // Send the boolean success value when result is undefined
+                    PassageLogger.debug(TAG, "Wait command succeeded with undefined result, using boolean value: true")
+                }
+
+                PassageLogger.info(TAG, "Wait command result: $commandId -> value=$value, result=$result")
                 if (value) {
-                    // Clear lastWaitCommand to prevent re-execution after successful completion
+                    // Clear wait command tracking to prevent re-execution after successful completion
                     if (lastWaitCommand?.id == commandId) {
                         PassageLogger.debug(TAG, "Clearing lastWaitCommand after successful completion: $commandId")
                         lastWaitCommand = null
+                    }
+                    if (executingWaitCommand?.id == commandId) {
+                        PassageLogger.debug(TAG, "Clearing executingWaitCommand after successful completion: $commandId")
+                        executingWaitCommand = null
                     }
 
                     launchInScope("waitCommandSuccess:$commandId") {
@@ -1435,6 +1479,11 @@ class RemoteControlManager(
                         sendCommandResultHttp(commandId, "success", result, pageData, null)
                     }
                 } else {
+                    // Clear executing wait command on failure too
+                    if (executingWaitCommand?.id == commandId) {
+                        PassageLogger.debug(TAG, "Clearing executingWaitCommand after failure: $commandId")
+                        executingWaitCommand = null
+                    }
                     launchInScope("waitCommandError:$commandId") {
                         sendCommandResultHttp(commandId, "error", null, null, "Wait command failed")
                     }
@@ -1780,6 +1829,7 @@ class RemoteControlManager(
         currentCommand = null
         lastUserActionCommand = null
         lastWaitCommand = null
+        executingWaitCommand = null
         currentSuccessUrls = emptyList()
 
         PassageLogger.info(TAG, "Cleanup completed")

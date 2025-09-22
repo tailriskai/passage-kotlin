@@ -449,7 +449,11 @@ class PassageWebViewActivity : AppCompatActivity() {
                     val resultIntent = Intent(PassageConstants.BroadcastActions.SCRIPT_EXECUTION_RESULT).apply {
                         putExtra("commandId", commandId)
                         putExtra("success", success)
-                        putExtra("result", unquotedResult)
+                        if (success) {
+                            putExtra("result", unquotedResult)
+                        } else {
+                            putExtra("error", unquotedResult ?: "Script execution failed")
+                        }
                     }
                     LocalBroadcastManager.getInstance(this@PassageWebViewActivity).sendBroadcast(resultIntent)
                 }
@@ -527,7 +531,14 @@ class PassageWebViewActivity : AppCompatActivity() {
     private fun handleNavigationComplete(webViewType: String, url: String) {
         PassageLogger.info(TAG, "Navigation complete in $webViewType: ${PassageLogger.truncateUrl(url, 100)}")
 
-        // Send navigation completed broadcast via LocalBroadcastManager
+        // For automation webview, directly call RemoteControl's handleNavigationComplete
+        // This matches Swift's handleNavigationStateChange behavior
+        if (webViewType == PassageConstants.WebViewTypes.AUTOMATION) {
+            PassageLogger.info(TAG, "[NAVIGATION] Page loaded for automation webview, handling navigation complete")
+            remoteControl?.handleNavigationComplete(url)
+        }
+
+        // Also send navigation completed broadcast via LocalBroadcastManager for other listeners
         val intent = Intent(PassageConstants.BroadcastActions.NAVIGATION_COMPLETED).apply {
             putExtra("url", url)
             putExtra("webViewType", webViewType)

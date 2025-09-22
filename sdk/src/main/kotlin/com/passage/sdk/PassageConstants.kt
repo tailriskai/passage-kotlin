@@ -68,7 +68,7 @@ object PassageConstants {
         const val SOCKET_NAMESPACE = "/ws"
         const val LOGGER_ENDPOINT = "https://ui.runpassage.ai/api/logger"
         const val ANALYTICS_ENDPOINT = "https://api.runpassage.ai/analytics"
-        const val AGENT_NAME = "passage-swift"
+        const val AGENT_NAME = "passage-kotlin"
         const val SDK_VERSION = "0.0.2"
     }
 
