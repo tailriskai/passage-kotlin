@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">Passage SDK Example</string>
+    <string name="title">Passage SDK Example</string>
+    <string name="mode_auto">Auto-Fetch Token</string>
+    <string name="mode_manual">Manual Token</string>
+    <string name="integration_label">Integration Type</string>
+    <string name="token_label">Intent Token</string>
+    <string name="placeholder_token">Paste intent token here…</string>
+    <string name="initialize">Initialize SDK</string>
+    <string name="connect">Connect</string>
+    <string name="open_passage">Open Passage</string>
+    <string name="enter_token">Enter Token First</string>
+    <string name="fetching_token">Fetching token…</string>
+    <string name="opening_passage">Opening Passage…</string>
+    <string name="initializing">Initializing…</string>
+    <string name="loading_integrations">Loading integrations…</string>
+    <string name="results_placeholder">Results will appear here…</string>
+    <string name="select_integration">Select Integration</string>
+    <string name="cancel">Cancel</string>
+</resources>
