@@ -517,9 +517,7 @@ class RemoteControlManager(
                     }
 
                     val successData = PassageSuccessData(
-                        history = connections.map { item ->
-                            PassageHistoryItem(structuredData = item, additionalData = emptyMap())
-                        },
+                        history = connections,
                         connectionId = connectionId
                     )
                     // Skip calling onSuccess here - onConnectionComplete should only be called from done command
@@ -964,12 +962,7 @@ class RemoteControlManager(
                 PassageLogger.info(TAG, "Extracted connectionId: $connectionId")
                 PassageLogger.info(TAG, "Found ${historyData.size} history items")
 
-                val history = historyData.map { item ->
-                    PassageHistoryItem(
-                        structuredData = item,
-                        additionalData = emptyMap()
-                    )
-                }
+                val history = historyData
 
                 val successData = PassageSuccessData(
                     history = history,
@@ -980,7 +973,7 @@ class RemoteControlManager(
                 PassageLogger.info(TAG, "successData.connectionId: $connectionId")
                 PassageLogger.info(TAG, "successData.history.size: ${history.size}")
                 history.forEachIndexed { index, item ->
-                    PassageLogger.info(TAG, "History item #$index: ${item.structuredData}")
+                    PassageLogger.info(TAG, "History item #$index: $item")
                 }
                 PassageLogger.info(TAG, "Full successData: $successData")
                 PassageLogger.info(TAG, "===================================")
@@ -1015,21 +1008,15 @@ class RemoteControlManager(
         }
     }
 
-    private fun parseHistoryFromDoneCommand(data: Any?): List<PassageHistoryItem> {
+    private fun parseHistoryFromDoneCommand(data: Any?): List<Any?> {
         val commandData = data as? Map<String, Any> ?: return emptyList()
         val historyWrapper = commandData["history"] as? Map<String, Any> ?: return emptyList()
         val historyArray = historyWrapper["history"] as? List<Map<String, Any>> ?: return emptyList()
 
         PassageLogger.info(TAG, "Parsed ${historyArray.size} history items from done command")
 
-        return historyArray.map { item ->
-            // The items from done command are already structured data (books, etc.)
-            // No need to extract structuredData property (matching Swift implementation)
-            PassageHistoryItem(
-                structuredData = item,
-                additionalData = emptyMap()
-            )
-        }
+        // Return history items directly without wrapping
+        return historyArray
     }
 
     private fun parsePageDataFromMap(data: Map<String, Any>): PageData {
@@ -2002,7 +1989,7 @@ class RemoteControlManager(
             // Call success callback
             connectionData?.let { connData ->
                 val successData = PassageSuccessData(
-                    history = connData.map { PassageHistoryItem(it, emptyMap()) },
+                    history = connData,
                     connectionId = connectionId ?: ""
                 )
                 onSuccess?.invoke(successData)

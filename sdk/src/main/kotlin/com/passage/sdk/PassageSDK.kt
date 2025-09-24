@@ -516,18 +516,13 @@ object PassageSDK {
         // Get stored connection data from remote control
         val storedData = remoteControl?.getStoredConnectionData()
 
-        var history = listOf<PassageHistoryItem>()
+        var history = listOf<Any?>()
         var connectionId = ""
 
         if (storedData?.first?.isNotEmpty() == true) {
             PassageLogger.info("[SDK] ✅ Using stored connection data with ${storedData.first?.size} items")
 
-            history = storedData.first?.map { item ->
-                PassageHistoryItem(
-                    structuredData = item,
-                    additionalData = emptyMap()
-                )
-            } ?: emptyList()
+            history = storedData.first ?: emptyList()
 
             connectionId = storedData.second ?: ""
         } else {
@@ -610,20 +605,12 @@ object PassageSDK {
         }
     }
 
-    private fun parseHistory(data: Any?): List<PassageHistoryItem> {
+    private fun parseHistory(data: Any?): List<Any?> {
         @Suppress("UNCHECKED_CAST")
-        val historyArray = data as? List<Map<String, Any>> ?: return emptyList()
+        val historyArray = data as? List<Any?> ?: return emptyList()
 
-        return historyArray.map { item ->
-            val structuredData = item["structuredData"]
-            val additionalData = item.toMutableMap()
-            additionalData.remove("structuredData")
-
-            PassageHistoryItem(
-                structuredData = structuredData,
-                additionalData = additionalData
-            )
-        }
+        // Return history items directly without modification
+        return historyArray
     }
 
     private fun cleanupAfterClose() {

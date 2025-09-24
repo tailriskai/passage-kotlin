@@ -19,13 +19,8 @@ data class PassageConfig(
 
 // Success/Error data
 data class PassageSuccessData(
-    val history: List<PassageHistoryItem>,
+    val history: List<Any?>,
     val connectionId: String
-)
-
-data class PassageHistoryItem(
-    val structuredData: Any?,
-    val additionalData: Map<String, Any>
 )
 
 data class PassageErrorData(
