@@ -355,6 +355,31 @@ class PassageWebViewActivity : AppCompatActivity() {
                     hasLoadedAutomationUrl = true
                 }
             }
+            "changeUserAgent" -> {
+                val newUserAgent = intent.getStringExtra("userAgent")
+                if (newUserAgent != null) {
+                    PassageLogger.info(TAG, "Changing automation user agent and reloading: $newUserAgent")
+
+                    // Store the new user agent
+                    automationUserAgent = newUserAgent
+
+                    // Get current URL to reload
+                    val currentUrl = automationWebView.url
+
+                    if (currentUrl != null && currentUrl.isNotEmpty()) {
+                        // Update user agent
+                        automationWebView.settings.userAgentString = newUserAgent
+
+                        // Reload the page with the new user agent
+                        automationWebView.loadUrl(currentUrl)
+                        PassageLogger.info(TAG, "Reloading automation webview with new user agent")
+                    } else {
+                        // Just update the user agent setting for future loads
+                        automationWebView.settings.userAgentString = newUserAgent
+                        PassageLogger.warn(TAG, "No URL to reload, user agent updated for future navigations")
+                    }
+                }
+            }
             else -> {
                 val url = intent.getStringExtra("url")
                 val targetWebView = intent.getStringExtra("targetWebView")
@@ -641,6 +666,14 @@ class PassageWebViewActivity : AppCompatActivity() {
                 handleJsRequestedClose()
                 true
             }
+            "showBottomSheet" -> {
+                handleShowBottomSheet(message)
+                true
+            }
+            "changeAutomationUserAgent" -> {
+                handleChangeUserAgent(message)
+                true
+            }
             PassageConstants.MessageTypes.MESSAGE -> {
                 val innerType = extractInnerMessageType(message["data"])
                 when (innerType) {
@@ -703,6 +736,69 @@ class PassageWebViewActivity : AppCompatActivity() {
             if (shouldRestoreAutomation) {
                 PassageLogger.info(TAG, "[Bridge] Restoring automation WebView after close cancellation")
                 showAutomationWebView()
+            }
+        }
+    }
+
+    private fun handleShowBottomSheet(message: Map<String, Any>) {
+        PassageLogger.info(TAG, "[Bridge] Show bottom sheet requested")
+
+        val title = message["title"] as? String
+        val description = message["description"] as? String
+        @Suppress("UNCHECKED_CAST")
+        val points = message["points"] as? List<String>
+        val closeButtonText = message["closeButtonText"] as? String
+        val showInput = message["showInput"] as? Boolean ?: false
+
+        PassageLogger.debug(TAG, "[Bridge] Bottom sheet params - title: $title, showInput: $showInput")
+
+        runOnUiThread {
+            try {
+                val bottomSheet = com.passage.sdk.ui.PassageBottomSheetDialog.newInstance(
+                    title = title,
+                    description = description,
+                    points = points,
+                    closeButtonText = closeButtonText,
+                    showInput = showInput,
+                    onSubmit = { url ->
+                        PassageLogger.info(TAG, "[Bottom Sheet] Submit with URL: $url")
+                        // Navigate to the submitted URL in automation webview
+                        automationWebView.loadUrl(url)
+                    }
+                )
+
+                bottomSheet.show(supportFragmentManager, "PassageBottomSheet")
+                PassageLogger.info(TAG, "[Bridge] Bottom sheet shown successfully")
+            } catch (e: Exception) {
+                PassageLogger.error(TAG, "[Bridge] Failed to show bottom sheet", e)
+            }
+        }
+    }
+
+    private fun handleChangeUserAgent(message: Map<String, Any>) {
+        val userAgent = message["userAgent"] as? String
+        if (userAgent != null) {
+            PassageLogger.info(TAG, "[Bridge] Change user agent requested: $userAgent")
+
+            runOnUiThread {
+                // Store the new user agent
+                automationUserAgent = userAgent
+
+                // Get current URL to reload
+                val currentUrl = automationWebView.url
+
+                if (currentUrl != null && currentUrl.isNotEmpty()) {
+                    // Update user agent
+                    automationWebView.settings.userAgentString = userAgent
+
+                    // Reload the page with the new user agent
+                    automationWebView.loadUrl(currentUrl)
+                    PassageLogger.info(TAG, "[Bridge] Reloading automation webview with new user agent")
+                } else {
+                    // Just update the user agent setting for future loads
+                    automationWebView.settings.userAgentString = userAgent
+                    PassageLogger.warn(TAG, "[Bridge] No URL to reload, user agent updated for future navigations")
+                }
             }
         }
     }
@@ -958,6 +1054,24 @@ class PassageWebViewActivity : AppCompatActivity() {
                             type: SWITCH_WEBVIEW_MESSAGE_TYPE,
                             targetWebView: targetWebView
                         }, SWITCH_WEBVIEW_MESSAGE_TYPE);
+                    },
+
+                    showBottomSheetModal: function(params) {
+                        sendToNative({
+                            type: 'showBottomSheet',
+                            title: params.title,
+                            description: params.description || null,
+                            points: params.points || null,
+                            closeButtonText: params.closeButtonText || null,
+                            showInput: params.showInput || false
+                        }, 'showBottomSheet');
+                    },
+
+                    changeAutomationUserAgent: function(userAgent) {
+                        sendToNative({
+                            type: 'changeAutomationUserAgent',
+                            userAgent: userAgent
+                        }, 'changeAutomationUserAgent');
                     }
                 };
 

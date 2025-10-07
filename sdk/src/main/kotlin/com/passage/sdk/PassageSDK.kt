@@ -24,6 +24,7 @@ object PassageSDK {
 
     // Configuration
     private var config: PassageConfig = PassageConfig()
+    private var isConfigured: Boolean = false
 
     // Debug: Track instance lifecycle
     private val instanceId = UUID.randomUUID().toString()
@@ -84,6 +85,7 @@ object PassageSDK {
      */
     fun configure(config: PassageConfig) {
         this.config = config
+        this.isConfigured = true
 
         // Configure logger with unified debug flag and SDK version
         PassageLogger.configure(debug = config.debug, sdkVersion = sdkVersion)
@@ -182,8 +184,15 @@ object PassageSDK {
 
         // Auto-configure with default values if not already configured
         if (remoteControl == null) {
-            PassageLogger.info("[SDK] RemoteControl not initialized - auto-configuring with default values")
-            configure(PassageConfig())
+            PassageLogger.info("[SDK] RemoteControl not initialized - creating with current config")
+
+            // Only configure with defaults if config was never set
+            if (!isConfigured) {
+                PassageLogger.info("[SDK] Config not initialized - using default values")
+                configure(PassageConfig())
+            } else {
+                PassageLogger.info("[SDK] Using existing config - socketUrl: ${config.socketUrl}, baseUrl: ${config.baseUrl}")
+            }
 
             // Now create RemoteControlManager with Activity context
             PassageLogger.info("[SDK] Creating RemoteControlManager with Activity context")
@@ -300,6 +309,67 @@ object PassageSDK {
                 putExtra("url", url)
             }
             activity.sendBroadcast(intent)
+        }
+    }
+
+    /**
+     * Change the automation webview user agent and reload the current page
+     * This allows you to change how the automation webview identifies itself to websites
+     */
+    fun changeUserAgent(userAgent: String) {
+        PassageLogger.info("[SDK] Changing automation user agent to: $userAgent")
+
+        activityRef?.get()?.let { activity ->
+            val intent = Intent(PassageConstants.BroadcastActions.NAVIGATE).apply {
+                putExtra("action", "changeUserAgent")
+                putExtra("userAgent", userAgent)
+            }
+            activity.sendBroadcast(intent)
+        }
+    }
+
+    /**
+     * Clear cookies for specific domains only (preserves localStorage, sessionStorage)
+     */
+    fun clearCookies(domains: List<String>) {
+        PassageLogger.info("[SDK] Clearing cookies for specific domains: $domains")
+
+        activityRef?.get()?.let { activity ->
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            var deletedCount = 0
+
+            // Get all cookies and filter by domain
+            val allCookies = cookieManager.getCookie("https://www.google.com") // Workaround to get all cookies
+            PassageLogger.debug("[SDK] Processing cookies for domain filtering")
+
+            // Note: Android doesn't provide direct access to all cookies like iOS
+            // We need to clear cookies for each domain individually
+            for (domain in domains) {
+                // Clear cookies for domain and its subdomains
+                val domainPatterns = listOf(
+                    "https://$domain",
+                    "http://$domain",
+                    "https://.$domain",
+                    "http://.$domain"
+                )
+
+                for (pattern in domainPatterns) {
+                    val cookies = cookieManager.getCookie(pattern)
+                    if (cookies != null) {
+                        // Remove cookies by setting expired cookies
+                        val cookieList = cookies.split(";")
+                        for (cookie in cookieList) {
+                            val cookieName = cookie.split("=")[0].trim()
+                            val expiredCookie = "$cookieName=; Path=/; Domain=$domain; Max-Age=0"
+                            cookieManager.setCookie(domain, expiredCookie)
+                            deletedCount++
+                        }
+                    }
+                }
+            }
+
+            cookieManager.flush()
+            PassageLogger.info("[SDK] Cleared cookies for ${domains.size} domains (estimated $deletedCount cookies)")
         }
     }
 
