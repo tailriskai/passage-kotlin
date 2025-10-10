@@ -674,6 +674,10 @@ class PassageWebViewActivity : AppCompatActivity() {
                 handleChangeUserAgent(message)
                 true
             }
+            "openLink" -> {
+                handleOpenLink(message)
+                true
+            }
             PassageConstants.MessageTypes.MESSAGE -> {
                 val innerType = extractInnerMessageType(message["data"])
                 when (innerType) {
@@ -799,6 +803,39 @@ class PassageWebViewActivity : AppCompatActivity() {
                     automationWebView.settings.userAgentString = userAgent
                     PassageLogger.warn(TAG, "[Bridge] No URL to reload, user agent updated for future navigations")
                 }
+            }
+        }
+    }
+
+    private fun handleOpenLink(message: Map<String, Any>) {
+        PassageLogger.info(TAG, "[Bridge] openLink called from ${message["webViewType"]} webview")
+
+        val urlString = message["url"] as? String
+        if (urlString == null) {
+            PassageLogger.error(TAG, "[Bridge] openLink missing url parameter")
+            return
+        }
+
+        val url = try {
+            android.net.Uri.parse(urlString)
+        } catch (e: Exception) {
+            PassageLogger.error(TAG, "[Bridge] openLink invalid URL: $urlString", e)
+            return
+        }
+
+        PassageLogger.debug(TAG, "[Bridge] Opening external link: $urlString")
+
+        runOnUiThread {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, url)
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivity(intent)
+                    PassageLogger.info(TAG, "[Bridge] Successfully opened external link: $urlString")
+                } else {
+                    PassageLogger.error(TAG, "[Bridge] No app can handle URL: $urlString")
+                }
+            } catch (e: Exception) {
+                PassageLogger.error(TAG, "[Bridge] Failed to open external link: $urlString", e)
             }
         }
     }
@@ -1072,6 +1109,20 @@ class PassageWebViewActivity : AppCompatActivity() {
                             type: 'changeAutomationUserAgent',
                             userAgent: userAgent
                         }, 'changeAutomationUserAgent');
+                    },
+
+                    openLink: function(url) {
+                        console.log('[Passage] openLink called with:', url);
+                        try {
+                            sendToNative({
+                                type: 'openLink',
+                                url: url,
+                                webViewType: WEB_VIEW_TYPE
+                            }, 'openLink');
+                            console.log('[Passage] openLink request sent for URL:', url);
+                        } catch (error) {
+                            console.error('[Passage] Error opening link:', error);
+                        }
                     }
                 };
 
